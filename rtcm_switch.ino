@@ -1,13 +1,17 @@
 /* This sketch multiplexes two RTCM serial sources into one.
- * On ESP32,the sources are Serial1 (radio) and Bluetooth SPP.
+ * On ESP32,the sources are Radio (Serial2) and Bluetooth SPP.
  *
- * The ESP32 vesion defaults to passing Serial1 through to
- * Serial unless data is received on Bluetooth Serial. In
- * that case, only bluetooth data is passed to Serial.  After
- * a timeout of no data received, it switches back to Serial1.
+ * The ESP32 vesion defaults to passing Radio (Serial2) through 
+ * to GPS (Serial1) unless data is received on Bluetooth Serial. 
+ * In that case, only bluetooth data is passed to GPS (Serial1). 
+ * After a timeout of no data received, it switches back to 
+ * Radio (Serial2).
  *
- * Speed is hard coded to 57600 because that's what I'm using
+ * Speed is usually set to 57600 because that's what I'm using
  * on the Trimble receivers and the radio network.
+ *
+ * Using pins 16 & 17 for the GPS uart (F9P uart2 or Trimble Port
+ * C).  Pins 25 & 26 connect to the radio modem's uart.
  */
 
 #include <BluetoothSerial.h>
@@ -24,8 +28,8 @@ bool use_bluetooth;
 #define RADIO_RX 25
 #define RADIO_TX 26
 
-#define TRIMBLE_RX 16
-#define TRIMBLE_TX 17
+#define GPS_RX 16
+#define GPS_TX 17
 
 #define TRAFFIC_LED 19
 
@@ -35,7 +39,7 @@ bool use_bluetooth;
 void setup() {
 	Serial.begin(115200);
 	Radio.begin(57600,SERIAL_8N1,RADIO_RX,RADIO_TX); //radio
-	GPS.begin(57600,SERIAL_8N1,TRIMBLE_RX,TRIMBLE_TX); //F9P or Trimble
+	GPS.begin(57600,SERIAL_8N1,GPS_RX,GPS_TX); //F9P or Trimble
 	SerialBT.begin("TractorRTK"); //hard code name
 
 	//Serial.println("Using Radio.");
