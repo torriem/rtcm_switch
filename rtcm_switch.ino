@@ -11,7 +11,9 @@
  * on the Trimble receivers and the radio network.
  *
  * Using pins 16 & 17 for the GPS uart (F9P uart2 or Trimble Port
- * C).  Pins 25 & 26 connect to the radio modem's uart.
+ * C).  Pins 21 & 22 connect to the radio modem's uart.
+ * Pin 5 is a button/switch to enable pass-through mode for
+ * connecting XCTU to the Digi receiver via the RS232 port.
  */
 
 #include <BluetoothSerial.h>
@@ -25,13 +27,15 @@ bool use_bluetooth;
 
 #define BT_TIMEOUT 3000 //3 seconds
 
-#define RADIO_RX 25
-#define RADIO_TX 26
+#define RADIO_RX 21
+#define RADIO_TX 22
 
 #define GPS_RX 16
 #define GPS_TX 17
 
-#define TRAFFIC_LED 19
+#define PASSTHRU_PIN 5
+
+#define TRAFFIC_LED 2
 
 #define RADIO_SPEED 57600
 #define GPS_SPEED 57600
@@ -40,22 +44,38 @@ void setup() {
 	Serial.begin(115200);
 	Radio.begin(57600,SERIAL_8N1,RADIO_RX,RADIO_TX); //radio
 	GPS.begin(57600,SERIAL_8N1,GPS_RX,GPS_TX); //F9P or Trimble
-	SerialBT.begin("TractorRTK"); //hard code name
+	SerialBT.begin("Magnum 340 RTK"); //hard code name
 
-	//Serial.println("Using Radio.");
+
+	Serial.println("RTCM switcher.");
 
 	use_bluetooth = false;
 	last_bt_time = millis();
 
-	pinMode(18, OUTPUT);
+	pinMode(TRAFFIC_LED, OUTPUT);
+	pinMode(PASSTHRU_PIN, INPUT_PULLUP);
 }
 
 void loop() {
 	uint8_t c;
+	bool pass_through = false;
 	while(1) {
+		if (!digitalRead(PASSTHRU_PIN)) {
+			if (!pass_through) {
+				Serial.println("switching to pass through");
+			}
+			pass_through = true;
+			use_bluetooth = false;
+		} else {
+			if (pass_through) {
+				Serial.println("back to normal mode.");
+			}
+			pass_through = false;
+		}
+
 		if (Radio.available()) {
 			c = Radio.read();
-			if (!use_bluetooth) {
+			if (pass_through || !use_bluetooth) {
 				digitalWrite(TRAFFIC_LED,HIGH);
 				GPS.write(c);
 			}
@@ -66,7 +86,11 @@ void loop() {
 		if (GPS.available()) {
 			//pass GGA data onto bluetooth for VRS NTRIP
 			c = GPS.read();
-			SerialBT.write(c);
+			if (pass_through) {
+				Radio.write(c);
+			} else {
+				SerialBT.write(c);
+			}
 		}
 
 		if (SerialBT.available()) {
@@ -76,11 +100,12 @@ void loop() {
 			//	Serial.println ("Switching to Bluetooth.");
 			//}
 
-			use_bluetooth = true;
-			last_bt_time = millis();
-			GPS.write(c);
-			
-			digitalWrite(TRAFFIC_LED,HIGH);
+			if (!pass_through) {
+				use_bluetooth = true;
+				last_bt_time = millis();
+				GPS.write(c);
+				digitalWrite(TRAFFIC_LED,HIGH);
+			}
 		} else {
 			if ((millis() - last_bt_time) > BT_TIMEOUT) {
 				//haven't seen any bt data in a while
