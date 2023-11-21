@@ -35,18 +35,22 @@ bool use_bluetooth;
 
 #define PASSTHRU_PIN 5
 
-#define TRAFFIC_LED 2
+#define TRAFFIC_LED 4
 
 #define RADIO_SPEED 57600
 #define GPS_SPEED 57600
 
+#define BLUETOOTH_NAME "Tractor RTK"
+
+
 void setup() {
 	Serial.begin(115200);
-	Radio.begin(57600,SERIAL_8N1,RADIO_RX,RADIO_TX); //radio
-	GPS.begin(57600,SERIAL_8N1,GPS_RX,GPS_TX); //F9P or Trimble
-	SerialBT.begin("Magnum 340 RTK"); //hard code name
+	Radio.begin(RADIO_SPEED,SERIAL_8N1,RADIO_RX,RADIO_TX); //radio
+	GPS.begin(GPS_SPEED,SERIAL_8N1,GPS_RX,GPS_TX); //F9P or Trimble
+	SerialBT.begin(BLUETOOTH_NAME); //hard code name
 
 
+	Serial.println();
 	Serial.println("RTCM switcher.");
 
 	use_bluetooth = false;
