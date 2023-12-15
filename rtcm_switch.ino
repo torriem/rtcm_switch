@@ -68,7 +68,7 @@ void setup() {
 	if (serial_wait > 0) {
 		start_time = millis();
 
-		while ( (millis() - start_time) > serial_wait) {
+		while ( (millis() - start_time) < serial_wait) {
 			//consume the bytes so buffers don't overflow
 			if (Radio.available())
 				Radio.read();
