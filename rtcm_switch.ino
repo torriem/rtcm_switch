@@ -42,13 +42,19 @@ bool use_bluetooth;
 
 #define BLUETOOTH_NAME "Tractor RTK"
 
+/* Set serial_wait create a delay (in milliseconds)
+   before data is passed through to the serial port, in
+   order to wait for the monitor to boot up.  Set to 0
+   if not needed. */
+unsigned long serial_wait=0; //ms delay before relaying data
 
 void setup() {
+	unsigned long start_time;
+
 	Serial.begin(115200);
 	Radio.begin(RADIO_SPEED,SERIAL_8N1,RADIO_RX,RADIO_TX); //radio
 	GPS.begin(GPS_SPEED,SERIAL_8N1,GPS_RX,GPS_TX); //F9P or Trimble
 	SerialBT.begin(BLUETOOTH_NAME); //hard code name
-
 
 	Serial.println();
 	Serial.println("RTCM switcher.");
@@ -58,11 +64,24 @@ void setup() {
 
 	pinMode(TRAFFIC_LED, OUTPUT);
 	pinMode(PASSTHRU_PIN, INPUT_PULLUP);
+
+	if (serial_wait > 0) {
+		start_time = millis();
+
+		while ( (millis() - start_time) > serial_wait) {
+			//consume the bytes so buffers don't overflow
+			if (Radio.available())
+				Radio.read();
+			if (SerialBT.available())
+				SerialBT.read();
+		} 
+	}
 }
 
 void loop() {
 	uint8_t c;
 	bool pass_through = false;
+
 	while(1) {
 		if (!digitalRead(PASSTHRU_PIN)) {
 			if (!pass_through) {
