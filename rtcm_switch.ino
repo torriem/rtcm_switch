@@ -186,12 +186,12 @@ void setup() {
 
 	if (myGNSS.begin() == false) {
 		Serial.println(F("Cannot detect F9P. Halting."));
-		//while (1) {
+		while (1) {
 			digitalWrite(TRAFFIC_LED, HIGH);
 			delay(2000);
 			digitalWrite(TRAFFIC_LED, LOW);
 			delay(500);
-		//}
+		}
 	}
 
 	//enable NMEA output on I2C
