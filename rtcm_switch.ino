@@ -22,7 +22,7 @@
 #include <BluetoothSerial.h>
 #endif
 
-#define I2C
+//#define I2C
 
 #ifdef I2C
 #include <Wire.h>
