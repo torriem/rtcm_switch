@@ -69,18 +69,22 @@ bool use_bluetooth;
    order to wait for the monitor to boot up.  Set to 0
    if not needed. */
 unsigned long serial_wait=0; //ms delay before relaying data
+bool pass_through = false;
+unsigned long last_time = 0;
+
 
 #ifdef I2C
-char rtcm_buffer[1024];
+char rtcm_buffer[1026];
 int buf_len = 0;
 int rtcm_state = 0;
-int rtcm_length;
+int rtcm_length = 0;
 
 void onI2C_GGA(NMEA_GGA_data_t *nmeaData)
 {
 	//write out GGA sentence to the bluetooth
 	SerialBT.print((const char *)nmeaData->nmea); //includes CRLF
 }
+
 
 void process_rtcm_byte(char b) {
 	//rtcm parsing state machine
@@ -98,17 +102,18 @@ void process_rtcm_byte(char b) {
 		}
 		break;
 	case 1:
-		//looking for length of message
-		if (buf_len < 2) {
+		//looking for length of message, next 2 bytes
+		if (buf_len < 3) {
 			rtcm_buffer[buf_len++] = b;
 		}
 
-		if (buf_len == 2) {
+		if (buf_len == 3) {
+			rtcm_state = 3; //don't need to know type
+			rtcm_length = (rtcm_buffer[1] << 8) + rtcm_buffer[2];
+			rtcm_length &= 0x03ff; //isolate 10 least significant bits
+			//Serial.println();
 			//Serial.print("message length is: ");
 			//Serial.println(rtcm_length);
-			rtcm_state = 2;
-			rtcm_length = rtcm_buffer[1] << 8 + rtcm_buffer[2];
-			rtcm_length &= 0x03ff; //isolate 10 least significant bits
 		}
 		break;
 	case 2: 
@@ -121,6 +126,7 @@ void process_rtcm_byte(char b) {
 			int type =  (rtcm_buffer[3] << 8) + rtcm_buffer[4];
 			type >>= 4; //isolate 12 most significant bits
 #ifdef TEENSY
+			//Serial.println();
 			//Serial.print("Got message type: ");
 			//Serial.println(type);
 #endif
@@ -129,7 +135,7 @@ void process_rtcm_byte(char b) {
 		break;
 	case 3:
 		//get the message body
-		if (buf_len < (rtcm_length + 5) && buf_len < 1023) {
+		if (buf_len < (rtcm_length + 6) && buf_len < 1024) {
 			rtcm_buffer[buf_len++] = b;
 		}
 		if (buf_len == 1023) {
@@ -137,7 +143,7 @@ void process_rtcm_byte(char b) {
 			rtcm_state = 0;
 			return;
 		}
-		if (buf_len == (rtcm_length + 5)) {
+		if (buf_len == (rtcm_length + 6)) {
 			//we now have a full message including the CRC byte
 			//transmit the entire packet to GNSS
 			myGNSS.pushRawData(((uint8_t *)rtcm_buffer), buf_len, false);
@@ -180,11 +186,12 @@ void setup() {
 
 	if (myGNSS.begin() == false) {
 		Serial.println(F("Cannot detect F9P. Halting."));
-		while (1)
+		//while (1) {
 			digitalWrite(TRAFFIC_LED, HIGH);
 			delay(2000);
 			digitalWrite(TRAFFIC_LED, LOW);
 			delay(500);
+		//}
 	}
 
 	//enable NMEA output on I2C
@@ -239,80 +246,95 @@ void setup() {
 
 void loop() {
 	uint8_t c;
-	bool pass_through = false;
-
-	while(1) {
 #ifdef I2C
-		myGNSS.checkUblox();
-		myGNSS.checkCallbacks();
+	myGNSS.checkUblox();
+	myGNSS.checkCallbacks();
 #endif
 
-		if (!digitalRead(PASSTHRU_PIN)) {
-			if (!pass_through) {
-				Serial.println("switching to pass through");
-			}
-			pass_through = true;
-			use_bluetooth = false;
+	if (!digitalRead(PASSTHRU_PIN)) {
+		if (!pass_through) {
+			Serial.println("switching to pass through");
+		}
+		pass_through = true;
+		use_bluetooth = false;
+	} else {
+		if (pass_through) {
+			Serial.println("back to normal mode.");
+		}
+		pass_through = false;
+	}
+
+	if (Radio.available()) {
+		c = Radio.read();
+		if (pass_through || !use_bluetooth) {
+			digitalWrite(TRAFFIC_LED,HIGH);
+			GPS.write(c);
+#ifdef I2C
+			process_rtcm_byte(c);
+#endif
+		}
+	} else if (!use_bluetooth) {
+		digitalWrite(TRAFFIC_LED,LOW);
+	}
+
+	if (GPS.available()) {
+		//pass GGA data onto bluetooth for VRS NTRIP
+		c = GPS.read();
+		if (pass_through) {
+			Radio.write(c);
 		} else {
-			if (pass_through) {
-				Serial.println("back to normal mode.");
-			}
-			pass_through = false;
-		}
-
-		if (Radio.available()) {
-			c = Radio.read();
-			if (pass_through || !use_bluetooth) {
-				digitalWrite(TRAFFIC_LED,HIGH);
-				GPS.write(c);
-#ifdef I2C
-				process_rtcm_byte(c);
-#endif
-			}
-		} else if (!use_bluetooth) {
-			digitalWrite(TRAFFIC_LED,LOW);
-		}
-
-		if (GPS.available()) {
-			//pass GGA data onto bluetooth for VRS NTRIP
-			c = GPS.read();
-			if (pass_through) {
-				Radio.write(c);
-			} else {
-				SerialBT.write(c);
-			}
-		}
-
-		if (SerialBT.available()) {
-			//Bluetooth data available, switch to bluetooth
-			c = SerialBT.read();
-			//if (!use_bluetooth) {
-			//	Serial.println ("Switching to Bluetooth.");
-			//}
-
-			if (!pass_through) {
-				use_bluetooth = true;
-				last_bt_time = millis();
-				GPS.write(c);
-#ifdef I2C
-				process_rtcm_byte(c);
-#endif
-
-				digitalWrite(TRAFFIC_LED,HIGH);
-			}
-		} else {
-			if ((millis() - last_bt_time) > BT_TIMEOUT) {
-				//haven't seen any bt data in a while
-				//switch back to radio.
-
-				//if (use_bluetooth) {
-				//	Serial.println("Switching back to radio.");
-				//}
-				use_bluetooth = false;
-			}
-			if (use_bluetooth) {
-				digitalWrite(TRAFFIC_LED,LOW);
-			}
+			SerialBT.write(c);
 		}
 	}
+
+	if (SerialBT.available()) {
+		//Bluetooth data available, switch to bluetooth
+
+		c = SerialBT.read();
+		//if (!use_bluetooth) {
+		//	Serial.println ("Switching to Bluetooth.");
+		//}
+
+		if (!pass_through) {
+			use_bluetooth = true;
+			last_bt_time = millis();
+
+			GPS.write(c);
+#ifdef I2C
+			//Serial.write(c);
+			process_rtcm_byte(c);
+#endif
+			while(SerialBT.available()) {
+				c = SerialBT.read();
+				GPS.write(c);
+#ifdef I2C
+				//Serial.write(c);
+				process_rtcm_byte(c);
+#endif
+			}
+
+			digitalWrite(TRAFFIC_LED,HIGH);
+		}
+	} else {
+		if ((millis() - last_bt_time) > BT_TIMEOUT) {
+			//haven't seen any bt data in a while
+			//switch back to radio.
+
+			//if (use_bluetooth) {
+			//	Serial.println("Switching back to radio.");
+			//}
+			use_bluetooth = false;
+		}
+		if (use_bluetooth) {
+			digitalWrite(TRAFFIC_LED,LOW);
+		}
+	}
+	if ((millis() - last_time) >2000 ) {
+		last_time = millis();
+
+		//do something every two seconds
+
+	}
+
+
 }
